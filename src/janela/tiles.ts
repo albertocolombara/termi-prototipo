@@ -66,13 +66,18 @@ async function tile(key: string): Promise<SkImage | null> {
 export type AtlasState = { image: SkImage | null; b: [number, number, number] };
 
 const N = 4;
-const SIZE = 512;
 
 /**
  * Monta um mosaico 4×4 de blocos em volta do avião, como no protótipo web.
  * Só remonta quando o avião muda de bloco.
  */
-export function makeAtlas(dir: 'w10' | 'w8' | 'i9', z: number, onChange: (s: AtlasState) => void) {
+export function makeAtlas(
+  dir: 'w10' | 'w8' | 'i9',
+  z: number,
+  px: number,
+  onChange: (s: AtlasState) => void,
+) {
+  const cell = px / N;
   const deg = 288 / 2 ** z;
   const cache = new Map<string, Promise<SkImage | null>>();
   let key = '';
@@ -92,12 +97,15 @@ export function makeAtlas(dir: 'w10' | 'w8' | 'i9', z: number, onChange: (s: Atl
       const my = ++pending;
       Promise.all([...Array(N * N)].map((_, i) => img(r0 + Math.floor(i / N), c0 + (i % N)))).then((ims) => {
         if (my !== pending) return;
-        const surface = Skia.Surface.Make(N * SIZE, N * SIZE);
+        const surface = Skia.Surface.Make(px, px);
         if (!surface) return;
         const canvas = surface.getCanvas();
+        const paint = Skia.Paint();
         canvas.clear(Skia.Color('transparent'));
         ims.forEach((im, i) => {
-          if (im) canvas.drawImage(im, (i % N) * SIZE, Math.floor(i / N) * SIZE);
+          if (!im) return;
+          const dst = Skia.XYWHRect((i % N) * cell, Math.floor(i / N) * cell, cell, cell);
+          canvas.drawImageRect(im, Skia.XYWHRect(0, 0, im.width(), im.height()), dst, paint);
         });
         surface.flush();
         const snap = surface.makeImageSnapshot();

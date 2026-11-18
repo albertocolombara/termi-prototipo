@@ -121,6 +121,8 @@ export default function App() {
   const [satClouds, setSatClouds] = useState(true);
   const [sky, setSky] = useState<'real' | 'dia' | 'tarde' | 'noite'>('real');
   const [showDiag, setShowDiag] = useState(true);
+  const [showLandscape, setShowLandscape] = useState(true);
+  const [showOverlay, setShowOverlay] = useState(true);
   const flightRef = useRef<Flight | null>(null);
 
   const commit = useCallback((f: Flight | null) => {
@@ -342,6 +344,8 @@ export default function App() {
         quality={quality}
         satClouds={satClouds}
         showMeter={showDiag}
+        showLandscape={showLandscape}
+        showOverlay={showOverlay}
       />
 
       <View style={{ padding: 20, gap: 14 }}>
@@ -370,7 +374,16 @@ export default function App() {
 
         {showDiag && (
           <View style={{ gap: 12 }}>
-            <Text style={styles.section}>Quadros da janela</Text>
+            <Text style={styles.section}>Camadas (para achar o que pesa)</Text>
+            <View style={styles.chips}>
+              <Pressable onPress={() => setShowLandscape((v) => !v)} style={[styles.chip, showLandscape && styles.chipOn]}>
+                <Text style={[styles.chipText, showLandscape && styles.chipTextOn]}>Paisagem</Text>
+              </Pressable>
+              <Pressable onPress={() => setShowOverlay((v) => !v)} style={[styles.chip, showOverlay && styles.chipOn]}>
+                <Text style={[styles.chipText, showOverlay && styles.chipTextOn]}>Asa e moldura</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.section}>Quadros da paisagem</Text>
             <View style={styles.chips}>
               {[2, 10, 30].map((v) => (
                 <Pressable key={v} onPress={() => setFps(v)} style={[styles.chip, fps === v && styles.chipOn]}>

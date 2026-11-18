@@ -2,12 +2,9 @@
 // Mesma câmera (assento atrás da asa, olhando para o lado esquerdo), mesma terra,
 // mesmas nuvens e mesmo céu. Texturas viram "uniform shader" e são lidas em pixels.
 
-export const TEX = {
-  base: [4096, 3584], // base_dia / base_noite (Blue Marble / Black Marble)
-  det: [2560, 3072], // det_noite
-  cl: [1024, 1024], // nuvens
-  atlas: [2048, 2048], // 4×4 blocos de 512
-} as const;
+// Tamanhos das texturas na GPU. Reduzidos para caber no cache de texturas do Skia
+// (256 MB por padrão): acima disso ele reenviava as texturas a cada quadro.
+export const ATLAS_PX = { near: 2048, mid: 1024, imp: 1024 } as const;
 
 export const SKSL = `
 uniform float2 res;
@@ -33,10 +30,12 @@ uniform shader tImp;
 
 const float R = 6371.0;
 const float H = 10.5;
-const float2 SZB = float2(4096.0, 3584.0);
-const float2 SZD = float2(2560.0, 3072.0);
+const float2 SZB = float2(2048.0, 1792.0);
+const float2 SZD = float2(1280.0, 1536.0);
 const float2 SZC = float2(1024.0, 1024.0);
-const float2 SZA = float2(2048.0, 2048.0);
+const float2 SZN = float2(2048.0, 2048.0);
+const float2 SZM = float2(1024.0, 1024.0);
+const float2 SZI = float2(1024.0, 1024.0);
 
 float h21(float2 p) { p = fract(p * float2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vn(float2 p) {
@@ -55,21 +54,21 @@ bool inside(float2 uv) { return uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y <
 half4 atlNear(float2 g) {
   float2 uv = float2((g.x - bNear.x) / bNear.z, (bNear.y - g.y) / bNear.z);
   if (!inside(uv)) return half4(0);
-  half4 s = tNear.eval(uv * SZA);
+  half4 s = tNear.eval(uv * SZN);
   float e = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
   return half4(s.rgb, s.a * smoothstep(0.0, 0.07, e));
 }
 half4 atlMid(float2 g) {
   float2 uv = float2((g.x - bMid.x) / bMid.z, (bMid.y - g.y) / bMid.z);
   if (!inside(uv)) return half4(0);
-  half4 s = tMid.eval(uv * SZA);
+  half4 s = tMid.eval(uv * SZM);
   float e = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
   return half4(s.rgb, s.a * smoothstep(0.0, 0.07, e));
 }
 half4 atlImp(float2 g) {
   float2 uv = float2((g.x - bImp.x) / bImp.z, (bImp.y - g.y) / bImp.z);
   if (!inside(uv)) return half4(0);
-  half4 s = tImp.eval(uv * SZA);
+  half4 s = tImp.eval(uv * SZI);
   float e = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
   return half4(s.rgb, s.a * smoothstep(0.0, 0.07, e));
 }
