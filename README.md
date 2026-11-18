@@ -1,19 +1,18 @@
 # Termi · protótipo técnico
 
-Protótipo descartável para validar três riscos antes de construir o app:
+Protótipo para validar, no Android, o que o app vai ter de verdade:
 
-1. **Janela em Skia** a 10 fps num Android fraco (céu pela altura real do sol, terra com bloco da NASA, nuvens, moldura).
-2. **Timer de voo com a tela bloqueada**: notificação fixa com contagem regressiva e aviso de pouso agendado.
-3. **Regra dos 10 s fora do app**, sem contar tela bloqueada nem ligação (módulo nativo em `modules/screen-state`).
+1. **Janela real**: o mesmo shader da "Janela ao vivo · com Blender", portado para Skia. Vista lateral, assento atrás da asa; asa e moldura renderizadas no Blender (dia, entardecer, noite); terra Landsat 30 m (NASA WELD) em blocos em volta do avião; cidades à noite (GMIS + Black Marble); nuvens de satélite (NOAA-20, 16/11/2026).
+2. **Serviço de bordo = Pomodoro**: a cada X min de foco, uma pausa de Y min. Avisos agendados no embarque (funcionam com o app fechado). O pouso não muda de horário.
+3. **Sem punição por sair do app.** Quem quiser sair do voo toca em "Desembarcar".
 
-Voo simulado GRU → FOR, sem dados ao vivo.
+Voo Barcelona → Londres (os blocos Landsat empacotados cobrem esse trajeto), na velocidade real.
 
 ## Como instalar
-Cada push na `main` gera um APK em **Releases**. Baixe no celular e instale.
+Cada push na `main` gera um APK em **Releases**.
 
 ## Estrutura
-- `App.tsx`: telas e regras do voo
-- `src/Window.tsx`: janela em Skia (shader)
-- `src/sky.ts`: rota simulada e altura do sol
-- `modules/screen-state`: módulo nativo Kotlin (tela, ligação, notificação fixa)
-- `.github/workflows/android.yml`: build do APK
+- `App.tsx`: telas, voo e serviço de bordo
+- `src/janela/`: janela (shader SkSL, blocos Landsat, rota e sol)
+- `assets/janela/`: renders do Blender, mapas base e pacotes de blocos
+- `modules/screen-state`: notificação fixa com contagem regressiva (Kotlin)

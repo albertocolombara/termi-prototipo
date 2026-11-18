@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Animated as RNAnimated,
   AppState,
-  AppStateStatus,
   Platform,
   Pressable,
   ScrollView,
@@ -16,27 +14,32 @@ import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScreenState } from './modules/screen-state/src';
-import { FlightWindow } from './src/Window';
-import { ROUTE, describeSun, positionAt, sunAltitude } from './src/sky';
+import { Janela, QUALITY } from './src/janela/Janela';
+import { ROUTE, place, pos, progressAt } from './src/janela/geo';
 
-// ───────────────────────── Regras do protótipo ─────────────────────────
-const TURBULENCE_AFTER_MS = 10_000; // ~10 s fora do app
-const MAX_TURBULENCE = 3;
-const LOCK_WINDOW_MS = 1500; // tela desligada até 1,5 s antes de sair = bloqueio, não troca de app
-const DURATIONS = [1, 3, 15, 30, 60, 120];
-const STORAGE_KEY = 'termi.voo';
+// ───────────────────────── Voo e serviço de bordo ─────────────────────────
+// Sair do app não tem punição. O serviço de bordo é a pausa do Pomodoro:
+// a cada X min de foco, uma pausa de Y min. O pouso não muda de horário.
 
-type Status = 'voando' | 'pousou' | 'pouso-alternativo' | 'desembarcou';
+const DURATIONS = [3, 25, 50, 80];
+const CYCLES = [
+  { id: '25/5', label: '25 + 5 min', focus: 25, pause: 5 },
+  { id: '50/10', label: '50 + 10 min', focus: 50, pause: 10 },
+  { id: 'teste', label: 'Teste: 1 + 0,5 min', focus: 1, pause: 0.5 },
+  { id: 'off', label: 'Desligado', focus: 0, pause: 0 },
+];
+const STORAGE_KEY = 'termi.voo.v2';
+
+type Status = 'voando' | 'pousou' | 'desembarcou';
+type Pause = { start: number; end: number };
 type LogEntry = { at: number; msg: string };
 type Flight = {
   startAt: number;
   endAt: number;
   minutes: number;
-  turbulence: number;
+  cycleId: string;
+  pauses: Pause[];
   status: Status;
-  leftAt: number | null;
-  warnId: string | null;
-  landId: string | null;
   endedAt: number | null;
   log: LogEntry[];
 };
@@ -49,8 +52,8 @@ const C = {
   dim: '#FFFFFFB3',
   faint: '#FFFFFF66',
   yellow: '#FFC93C',
-  orange: '#F28C28',
   green: '#9BE38B',
+  blue: '#7FB2FF',
 };
 
 Notifications.setNotificationHandler({
@@ -62,8 +65,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-const hhmm = (ms: number) =>
-  new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const hhmm = (ms: number) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const hhmmss = (ms: number) =>
   new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const clock = (ms: number) => {
@@ -71,9 +73,24 @@ const clock = (ms: number) => {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const ss = s % 60;
-  const mm = String(m).padStart(h ? 2 : 1, '0');
-  return `${h ? h + ':' : ''}${mm}:${String(ss).padStart(2, '0')}`;
+  return `${h ? h + ':' : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(ss).padStart(2, '0')}`;
 };
+
+function planPauses(startAt: number, endAt: number, focus: number, pause: number): Pause[] {
+  if (!focus || !pause) return [];
+  const out: Pause[] = [];
+  let t = startAt + focus * 60_000;
+  // Sem pausa colada no pouso: precisa sobrar pelo menos 1 min de foco depois dela.
+  while (t + pause * 60_000 + 60_000 <= endAt) {
+    out.push({ start: t, end: t + pause * 60_000 });
+    t += (pause + focus) * 60_000;
+  }
+  return out;
+}
+
+const pauseAt = (f: Flight, t: number) => f.pauses.find((p) => t >= p.start && t < p.end) ?? null;
+const pausedMs = (f: Flight, until: number) =>
+  f.pauses.reduce((sum, p) => sum + Math.max(0, Math.min(until, p.end) - p.start), 0);
 
 async function setupChannels() {
   if (Platform.OS !== 'android') return;
@@ -83,8 +100,8 @@ async function setupChannels() {
     sound: 'default',
     vibrationPattern: [0, 250, 150, 250],
   });
-  await Notifications.setNotificationChannelAsync('turbulencia', {
-    name: 'Turbulência',
+  await Notifications.setNotificationChannelAsync('servico', {
+    name: 'Serviço de bordo',
     importance: Notifications.AndroidImportance.HIGH,
     sound: 'default',
   });
@@ -94,16 +111,18 @@ export default function App() {
   const { width } = useWindowDimensions();
   const [flight, setFlight] = useState<Flight | null>(null);
   const [screen, setScreen] = useState<'inicio' | 'voo' | 'fim'>('inicio');
-  const [minutes, setMinutes] = useState(1);
+  const [minutes, setMinutes] = useState(3);
+  const [cycleId, setCycleId] = useState('teste');
   const [now, setNow] = useState(Date.now());
+  const [confirmExit, setConfirmExit] = useState(false);
+  // Diagnóstico da janela
   const [fps, setFps] = useState(10);
-  const [sky, setSky] = useState<'real' | 'dia' | 'por' | 'noite'>('real');
+  const [quality, setQuality] = useState(1);
+  const [satClouds, setSatClouds] = useState(true);
+  const [sky, setSky] = useState<'real' | 'dia' | 'tarde' | 'noite'>('real');
   const [showDiag, setShowDiag] = useState(true);
-  const [permission, setPermission] = useState<string>('?');
   const flightRef = useRef<Flight | null>(null);
-  const shake = useRef(new RNAnimated.Value(0)).current;
 
-  // Guarda o voo na memória e no aparelho (sobrevive se o Android fechar o app).
   const commit = useCallback((f: Flight | null) => {
     flightRef.current = f;
     setFlight(f ? { ...f } : null);
@@ -111,253 +130,156 @@ export default function App() {
     else AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
   }, []);
 
-  const log = (f: Flight, msg: string) => {
-    f.log = [{ at: Date.now(), msg }, ...f.log].slice(0, 80);
+  const log = (f: Flight, msg: string, at = Date.now()) => {
+    f.log = [{ at, msg }, ...f.log].slice(0, 80);
   };
 
-  const doShake = useCallback(() => {
-    shake.setValue(0);
-    RNAnimated.sequence(
-      [8, -7, 6, -5, 3, -2, 0].map((v) =>
-        RNAnimated.timing(shake, { toValue: v, duration: 70, useNativeDriver: true }),
-      ),
-    ).start();
-  }, [shake]);
-
   const finish = useCallback(
-    async (f: Flight, status: Status, reason: string) => {
+    (f: Flight, status: Status) => {
       f.status = status;
       f.endedAt = Math.min(Date.now(), f.endAt);
-      f.leftAt = null;
-      log(f, reason);
+      log(f, status === 'pousou' ? `Pousou em ${ROUTE.to.city}` : 'Desembarcou antes do pouso');
       ScreenState.hideFlightNotification();
-      if (f.warnId) Notifications.cancelScheduledNotificationAsync(f.warnId).catch(() => {});
-      if (status !== 'pousou' && f.landId) {
-        Notifications.cancelScheduledNotificationAsync(f.landId).catch(() => {});
-      }
+      if (status !== 'pousou') Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
       commit(f);
+      setConfirmExit(false);
       setScreen('fim');
     },
     [commit],
   );
 
-  // Volta ao app: decide se o tempo fora vira turbulência.
-  const handleReturn = useCallback(
-    (f: Flight) => {
-      if (f.warnId) {
-        Notifications.cancelScheduledNotificationAsync(f.warnId).catch(() => {});
-        f.warnId = null;
-      }
-      if (f.leftAt) {
-        const returnAt = Date.now();
-        const offAt = ScreenState.lastScreenOffAt();
-        // Se a tela apagou depois de sair do app, só conta até a tela apagar.
-        const end = offAt > f.leftAt ? Math.min(offAt, returnAt) : returnAt;
-        const away = end - f.leftAt;
-        const capped = Math.min(away, Math.max(0, f.endAt - f.leftAt));
-        const secs = Math.round(capped / 1000);
-        f.leftAt = null;
-        if (capped >= TURBULENCE_AFTER_MS) {
-          f.turbulence += 1;
-          log(f, `Turbulência ${f.turbulence}/${MAX_TURBULENCE} · fora por ${secs} s`);
-          doShake();
-          if (f.turbulence >= MAX_TURBULENCE) {
-            finish(f, 'desembarcou', 'Desembarcou: 3ª turbulência');
-            return;
-          }
-        } else {
-          log(f, `Voltou em ${secs} s · sem turbulência`);
-        }
-      } else {
-        log(f, 'Voltou ao app');
-      }
-      if (Date.now() >= f.endAt) {
-        finish(f, 'pousou', 'Pousou');
-        return;
-      }
-      commit(f);
-    },
-    [commit, doShake, finish],
-  );
-
-  // Restaura um voo salvo ao abrir o app.
+  // Restaura o voo se o sistema fechou o app.
   useEffect(() => {
     (async () => {
       const raw = await AsyncStorage.getItem(STORAGE_KEY).catch(() => null);
       if (!raw) return;
       const f: Flight = JSON.parse(raw);
+      flightRef.current = f;
+      setFlight(f);
       if (f.status !== 'voando') {
-        commit(f);
+        setScreen('fim');
         return;
       }
-      log(f, 'App reaberto (o sistema tinha fechado o app)');
+      log(f, 'App reaberto');
       setScreen('voo');
-      if (Date.now() >= f.endAt && !f.leftAt) {
-        finish(f, 'pousou', 'Pousou com o app fechado');
-        return;
-      }
-      ScreenState.showFlightNotification(
-        `${ROUTE.from.code} → ${ROUTE.to.code} · em voo`,
-        `Pouso às ${hhmm(f.endAt)}`,
-        f.endAt,
-      );
-      handleReturn(f);
+      if (Date.now() >= f.endAt) finish(f, 'pousou');
+      else commit(f);
     })();
-    Notifications.getPermissionsAsync().then((p) => setPermission(p.status));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Saída e volta do app.
+  // Relógio e pouso no horário (também ao voltar para o app).
   useEffect(() => {
-    const sub = AppState.addEventListener('change', async (state: AppStateStatus) => {
-      const f = flightRef.current;
-      if (!f || f.status !== 'voando') return;
-      if (state === 'background') {
-        const t = Date.now();
-        const interactive = ScreenState.isInteractive();
-        const offAt = ScreenState.lastScreenOffAt();
-        if (!interactive || t - offAt < LOCK_WINDOW_MS) {
-          log(f, 'Tela bloqueada · não conta');
-          f.leftAt = null;
-        } else if (ScreenState.isInCall()) {
-          log(f, 'Ligação · não conta');
-          f.leftAt = null;
-        } else {
-          f.leftAt = t;
-          log(f, 'Saiu do app');
-          try {
-            f.warnId = await Notifications.scheduleNotificationAsync({
-              content: {
-                title: `Turbulência ${f.turbulence + 1} de ${MAX_TURBULENCE}`,
-                body: 'Volte para o voo para o aviso apagar.',
-              },
-              trigger: {
-                type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-                seconds: TURBULENCE_AFTER_MS / 1000,
-                channelId: 'turbulencia',
-              },
-            });
-          } catch (e) {
-            log(f, `Erro ao agendar aviso: ${String(e)}`);
-          }
-        }
-        commit(f);
-      } else if (state === 'active') {
-        handleReturn(f);
-      }
-    });
-    return () => sub.remove();
-  }, [commit, handleReturn]);
-
-  // Relógio da tela e pouso no horário.
-  useEffect(() => {
-    const id = setInterval(() => {
+    const check = () => {
       setNow(Date.now());
       const f = flightRef.current;
-      if (f && f.status === 'voando' && !f.leftAt && Date.now() >= f.endAt) {
-        finish(f, 'pousou', 'Pousou');
-      }
-    }, 1000);
-    return () => clearInterval(id);
+      if (f && f.status === 'voando' && Date.now() >= f.endAt) finish(f, 'pousou');
+    };
+    const id = setInterval(check, 1000);
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && check());
+    return () => {
+      clearInterval(id);
+      sub.remove();
+    };
   }, [finish]);
 
   const board = async () => {
-    const perm = await Notifications.requestPermissionsAsync();
-    setPermission(perm.status);
+    await Notifications.requestPermissionsAsync();
     await setupChannels();
+    await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
+    const cycle = CYCLES.find((c) => c.id === cycleId)!;
     const startAt = Date.now();
     const endAt = startAt + minutes * 60_000;
     const f: Flight = {
       startAt,
       endAt,
       minutes,
-      turbulence: 0,
+      cycleId,
+      pauses: planPauses(startAt, endAt, cycle.focus, cycle.pause),
       status: 'voando',
-      leftAt: null,
-      warnId: null,
-      landId: null,
       endedAt: null,
       log: [],
     };
     log(f, `Embarcou · ${minutes} min · pouso às ${hhmmss(endAt)}`);
-    if (!ScreenState.available) log(f, 'Módulo nativo ausente: bloqueio de tela não é detectado');
+    log(f, f.pauses.length ? `${f.pauses.length} serviço(s) de bordo (${cycle.label})` : 'Sem serviço de bordo');
+
+    // Tudo é agendado no embarque: funciona com o app fechado e a tela bloqueada.
+    const date = (ms: number) => ({ type: Notifications.SchedulableTriggerInputTypes.DATE, date: ms } as const);
     try {
-      f.landId = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: `Você pousou em ${ROUTE.to.city}`,
-          body: `${minutes} min de foco. Abra para ver o que o voo rendeu.`,
-          sound: true,
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: endAt,
-          channelId: 'pouso',
-        },
+      for (const p of f.pauses) {
+        const pauseMin = Math.round(((p.end - p.start) / 60000) * 10) / 10;
+        await Notifications.scheduleNotificationAsync({
+          content: { title: 'Serviço de bordo', body: `Pausa de ${String(pauseMin).replace('.', ',')} min. Levante, beba água.` },
+          trigger: { ...date(p.start), channelId: 'servico' },
+        });
+        await Notifications.scheduleNotificationAsync({
+          content: { title: 'Fim do serviço de bordo', body: 'Apertem os cintos: de volta ao foco.' },
+          trigger: { ...date(p.end), channelId: 'servico' },
+        });
+      }
+      await Notifications.scheduleNotificationAsync({
+        content: { title: `Você pousou em ${ROUTE.to.city}`, body: `${minutes} min de voo. Abra para ver o que o voo rendeu.` },
+        trigger: { ...date(endAt), channelId: 'pouso' },
       });
-      log(f, `Aviso de pouso agendado para ${hhmmss(endAt)}`);
+      log(f, 'Avisos agendados');
     } catch (e) {
-      log(f, `Erro ao agendar pouso: ${String(e)}`);
+      log(f, `Erro ao agendar avisos: ${String(e)}`);
     }
-    ScreenState.showFlightNotification(
-      `${ROUTE.from.code} → ${ROUTE.to.code} · em voo`,
-      `Pouso às ${hhmm(endAt)}`,
-      endAt,
-    );
+    ScreenState.showFlightNotification(`${ROUTE.from.code} → ${ROUTE.to.code} · em voo`, `Pouso às ${hhmm(endAt)}`, endAt);
     commit(f);
     setScreen('voo');
   };
 
-  // ───────────────────────── Telas ─────────────────────────
   const top = (RNStatusBar.currentHeight ?? 24) + 12;
+  const winW = Math.min(width - 32, 440);
 
+  // ───────────────────────── Início ─────────────────────────
   if (screen === 'inicio' || !flight) {
     return (
-      <View style={[styles.root, { paddingTop: top }]}>
+      <ScrollView style={{ backgroundColor: C.bg }} contentContainerStyle={[styles.root, { paddingTop: top }]}>
         <StatusBar style="light" />
-        <Text style={styles.kicker}>TERMI · PROTÓTIPO TÉCNICO</Text>
+        <Text style={styles.kicker}>TERMI · PROTÓTIPO TÉCNICO 2</Text>
         <Text style={styles.h1}>Quanto tempo de foco?</Text>
         <Text style={styles.p}>
-          Voo simulado {ROUTE.from.code} → {ROUTE.to.code}. Este protótipo testa a janela, o timer
-          com a tela bloqueada e a regra dos 10 s fora do app.
+          Voo {ROUTE.from.city} → {ROUTE.to.city} com a janela do Blender e a terra do Landsat. Sair do app não tem
+          punição.
         </Text>
+        <Text style={styles.section}>Duração do voo</Text>
         <View style={styles.chips}>
           {DURATIONS.map((d) => (
-            <Pressable
-              key={d}
-              onPress={() => setMinutes(d)}
-              style={[styles.chip, minutes === d && styles.chipOn]}
-            >
-              <Text style={[styles.chipText, minutes === d && styles.chipTextOn]}>
-                {d < 60 ? `${d} min` : `${d / 60} h`}
-              </Text>
+            <Pressable key={d} onPress={() => setMinutes(d)} style={[styles.chip, minutes === d && styles.chipOn]}>
+              <Text style={[styles.chipText, minutes === d && styles.chipTextOn]}>{d} min</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={styles.section}>Serviço de bordo (foco + pausa)</Text>
+        <View style={styles.chips}>
+          {CYCLES.map((c) => (
+            <Pressable key={c.id} onPress={() => setCycleId(c.id)} style={[styles.chip, cycleId === c.id && styles.chipOn]}>
+              <Text style={[styles.chipText, cycleId === c.id && styles.chipTextOn]}>{c.label}</Text>
             </Pressable>
           ))}
         </View>
         <Pressable style={styles.primary} onPress={board}>
           <Text style={styles.primaryText}>Embarcar</Text>
         </Pressable>
-        <Text style={styles.small}>
-          Notificações: {permission} · módulo nativo: {ScreenState.available ? 'ok' : 'ausente'}
-        </Text>
-      </View>
+      </ScrollView>
     );
   }
 
+  // ───────────────────────── Fim ─────────────────────────
   if (screen === 'fim') {
-    const focused = Math.round(((flight.endedAt ?? flight.endAt) - flight.startAt) / 60000);
-    const title =
-      flight.status === 'pousou'
-        ? `Pousou em ${ROUTE.to.city}`
-        : flight.status === 'pouso-alternativo'
-          ? 'Pouso alternativo'
-          : 'O voo seguiu sem você';
+    const end = flight.endedAt ?? flight.endAt;
+    const focusMin = Math.round((end - flight.startAt - pausedMs(flight, end)) / 60000);
+    const breaks = flight.pauses.filter((p) => p.start < end).length;
     return (
-      <View style={[styles.root, { paddingTop: top }]}>
+      <View style={[styles.root, { paddingTop: top, flex: 1, backgroundColor: C.bg }]}>
         <StatusBar style="light" />
         <Text style={styles.kicker}>FIM DO VOO</Text>
-        <Text style={styles.h1}>{title}</Text>
+        <Text style={styles.h1}>{flight.status === 'pousou' ? `Pousou em ${ROUTE.to.city}` : 'Você desembarcou'}</Text>
         <Text style={styles.p}>
-          {focused} min focados · {flight.turbulence} turbulência(s)
+          {focusMin} min de foco · {breaks} serviço(s) de bordo
+          {flight.status === 'desembarcou' ? ' · sem carimbo nem loja' : ''}
         </Text>
         <Text style={styles.section}>Registro do voo</Text>
         <ScrollView style={styles.logBox}>
@@ -380,43 +302,67 @@ export default function App() {
     );
   }
 
-  const remaining = flight.endAt - now;
-  const progress = (now - flight.startAt) / (flight.endAt - flight.startAt);
-  const pos = positionAt(progress);
-  const realAlt = sunAltitude(new Date(now), pos.lat, pos.lon);
-  const sunAlt = sky === 'real' ? realAlt : sky === 'dia' ? 45 : sky === 'por' ? 0 : -20;
-  const winH = Math.round(width * 0.95);
+  // ───────────────────────── Em voo ─────────────────────────
+  const progress = progressAt(now, flight.startAt, flight.endAt);
+  const [la, lo] = pos(progress);
+  const driftKm = ((now - flight.startAt) / 3600e3) * ROUTE.speedKmh;
+  const fakeHour = sky === 'dia' ? 12.6 : sky === 'tarde' ? 16.4 : sky === 'noite' ? 20.5 : null;
+  const skyTime = fakeHour == null ? now : Date.UTC(2026, 10, 17) + fakeHour * 3600e3;
+  const pause = pauseAt(flight, now);
+  const next = flight.pauses.find((p) => p.start > now);
 
   return (
-    <View style={[styles.root, { paddingTop: top, paddingHorizontal: 0 }]}>
+    <ScrollView style={{ backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: top, paddingBottom: 40 }}>
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.route}>
-          {ROUTE.from.code} → {ROUTE.to.code}
+          {ROUTE.from.code} → {ROUTE.to.code} · sobrevoando {place(la, lo)}
         </Text>
-        <Text style={styles.timer}>{clock(remaining)}</Text>
+        <Text style={styles.timer}>{clock(flight.endAt - now)}</Text>
         <Text style={styles.small}>Pouso às {hhmm(flight.endAt)}</Text>
       </View>
 
-      {flight.turbulence > 0 && (
-        <View style={styles.turb}>
-          <Text style={styles.turbText}>
-            Turbulência {flight.turbulence} de {MAX_TURBULENCE}
-          </Text>
+      {pause ? (
+        <View style={styles.service}>
+          <Text style={styles.serviceTitle}>Serviço de bordo · {clock(pause.end - now)}</Text>
+          <Text style={styles.serviceText}>Pausa. Levante, beba água. O pouso continua no horário.</Text>
         </View>
-      )}
+      ) : next ? (
+        <Text style={[styles.small, { textAlign: 'center', marginBottom: 10 }]}>
+          Próximo serviço de bordo em {clock(next.start - now)}
+        </Text>
+      ) : null}
 
-      <RNAnimated.View style={{ transform: [{ translateX: shake }] }}>
-        <FlightWindow width={width} height={winH} fps={fps} sunAlt={sunAlt} showMeter={showDiag} />
-      </RNAnimated.View>
+      <Janela
+        width={winW}
+        progress={progress}
+        time={skyTime}
+        driftKm={driftKm}
+        fps={fps}
+        quality={quality}
+        satClouds={satClouds}
+        showMeter={showDiag}
+      />
 
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }}>
-        <Pressable
-          style={styles.secondary}
-          onPress={() => finish(flightRef.current!, 'pouso-alternativo', 'Pousou antes (usuário)')}
-        >
-          <Text style={styles.secondaryText}>Pousar antes</Text>
-        </Pressable>
+      <View style={{ padding: 20, gap: 14 }}>
+        {confirmExit ? (
+          <View style={styles.confirm}>
+            <Text style={styles.confirmTitle}>Desembarcar agora?</Text>
+            <Text style={styles.p}>
+              Seus minutos de foco ficam salvos. Sem carimbo e sem loja de souvenir neste voo.
+            </Text>
+            <Pressable style={styles.primary} onPress={() => setConfirmExit(false)}>
+              <Text style={styles.primaryText}>Continuar voando</Text>
+            </Pressable>
+            <Pressable onPress={() => finish(flightRef.current!, 'desembarcou')}>
+              <Text style={styles.link}>Desembarcar</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable style={styles.secondary} onPress={() => setConfirmExit(true)}>
+            <Text style={styles.secondaryText}>Desembarcar</Text>
+          </Pressable>
+        )}
 
         <Pressable onPress={() => setShowDiag((v) => !v)}>
           <Text style={styles.link}>{showDiag ? 'Esconder diagnóstico' : 'Mostrar diagnóstico'}</Text>
@@ -429,8 +375,17 @@ export default function App() {
               {[2, 10, 30].map((v) => (
                 <Pressable key={v} onPress={() => setFps(v)} style={[styles.chip, fps === v && styles.chipOn]}>
                   <Text style={[styles.chipText, fps === v && styles.chipTextOn]}>
-                    {v} fps{v === 10 ? ' (padrão)' : v === 2 ? ' (economia)' : ''}
+                    {v}
+                    {v === 10 ? ' · padrão' : v === 2 ? ' · economia' : ''}
                   </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.section}>Qualidade</Text>
+            <View style={styles.chips}>
+              {QUALITY.map((qq, i) => (
+                <Pressable key={qq.label} onPress={() => setQuality(i)} style={[styles.chip, quality === i && styles.chipOn]}>
+                  <Text style={[styles.chipText, quality === i && styles.chipTextOn]}>{qq.label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -438,9 +393,9 @@ export default function App() {
             <View style={styles.chips}>
               {(
                 [
-                  ['real', `Real (${describeSun(realAlt)})`],
+                  ['real', 'Hora real'],
                   ['dia', 'Dia'],
-                  ['por', 'Pôr do sol'],
+                  ['tarde', 'Entardecer'],
                   ['noite', 'Noite'],
                 ] as const
               ).map(([k, label]) => (
@@ -449,28 +404,34 @@ export default function App() {
                 </Pressable>
               ))}
             </View>
-            <Text style={styles.section}>Como testar</Text>
-            <Text style={styles.small}>
-              1. Bloqueie a tela por 20 s: não deve contar.{'\n'}
-              2. Vá para outro app por 15 s: deve contar turbulência.{'\n'}
-              3. Vá para outro app e volte antes de 10 s: não conta.{'\n'}
-              4. Bloqueie a tela até o pouso: a notificação deve tocar no horário.
-            </Text>
+            <Text style={styles.section}>Nuvens</Text>
+            <View style={styles.chips}>
+              {(
+                [
+                  [true, 'Satélite (16/11)'],
+                  [false, 'Geradas'],
+                ] as const
+              ).map(([v, label]) => (
+                <Pressable key={label} onPress={() => setSatClouds(v)} style={[styles.chip, satClouds === v && styles.chipOn]}>
+                  <Text style={[styles.chipText, satClouds === v && styles.chipTextOn]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
             <Text style={styles.section}>Registro</Text>
-            {flight.log.slice(0, 12).map((e, i) => (
+            {flight.log.slice(0, 10).map((e, i) => (
               <Text key={i} style={styles.logLine}>
                 {hhmmss(e.at)} {e.msg}
               </Text>
             ))}
           </View>
         )}
-      </ScrollView>
-    </View>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, gap: 14 },
+  root: { paddingHorizontal: 20, gap: 14, paddingBottom: 30 },
   kicker: { color: C.yellow, fontSize: 12, letterSpacing: 1.5, fontWeight: '700' },
   h1: { color: C.text, fontSize: 28, fontWeight: '700' },
   p: { color: C.dim, fontSize: 15, lineHeight: 22 },
@@ -488,13 +449,7 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: C.yellow, borderColor: C.yellow },
   chipText: { color: C.text, fontSize: 13 },
   chipTextOn: { color: '#1A1300', fontWeight: '700' },
-  primary: {
-    backgroundColor: C.yellow,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
+  primary: { backgroundColor: C.yellow, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   primaryText: { color: '#1A1300', fontSize: 16, fontWeight: '700' },
   secondary: {
     backgroundColor: C.card,
@@ -505,18 +460,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryText: { color: C.text, fontSize: 15, fontWeight: '600' },
-  link: { color: '#FFFFFFCC', textDecorationLine: 'underline', textAlign: 'center', fontSize: 13 },
-  header: { alignItems: 'center', paddingBottom: 6 },
-  route: { color: C.dim, fontSize: 13, letterSpacing: 1 },
+  link: { color: '#FFFFFFCC', textDecorationLine: 'underline', textAlign: 'center', fontSize: 14, paddingVertical: 6 },
+  header: { alignItems: 'center', paddingBottom: 10, paddingHorizontal: 16 },
+  route: { color: C.dim, fontSize: 13, textAlign: 'center' },
   timer: { color: C.text, fontSize: 44, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  turb: {
-    alignSelf: 'center',
-    backgroundColor: C.orange,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 999,
+  service: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#13233D',
+    borderWidth: 1,
+    borderColor: '#2B4670',
+    gap: 4,
   },
-  turbText: { color: '#1A0E00', fontWeight: '700', fontSize: 13 },
+  serviceTitle: { color: C.blue, fontWeight: '700', fontSize: 15 },
+  serviceText: { color: C.dim, fontSize: 13 },
+  confirm: { backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 8, borderWidth: 1, borderColor: C.border },
+  confirmTitle: { color: C.text, fontSize: 18, fontWeight: '700' },
   logBox: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12 },
   logLine: { color: C.green, fontSize: 11, fontFamily: 'monospace', lineHeight: 17 },
 });

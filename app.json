@@ -34,7 +34,8 @@
         {
           "color": "#F28C28"
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "backgroundColor": "#0E0F13"
   }
