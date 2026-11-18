@@ -30,7 +30,7 @@ jobs:
       - name: Liberar espaço e memória
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
-          sudo fallocate -l 14G /mnt/swap2 && sudo chmod 600 /mnt/swap2 && sudo mkswap /mnt/swap2 && sudo swapon /mnt/swap2
+          sudo fallocate -l 6G /mnt/swap2 && sudo chmod 600 /mnt/swap2 && sudo mkswap /mnt/swap2 && sudo swapon /mnt/swap2
           free -h; df -h /
 
       - name: Instalar dependências
@@ -39,9 +39,18 @@ jobs:
       - name: Gerar projeto Android
         run: npx expo prebuild --platform android --no-install
 
+      - name: Limitar memória do Gradle e do Kotlin
+        working-directory: android
+        run: |
+          sed -i '/org.gradle.jvmargs/d;/org.gradle.parallel/d' gradle.properties
+          printf '\norg.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=768m\norg.gradle.parallel=false\nkotlin.daemon.jvmargs=-Xmx1536m\n' >> gradle.properties
+          tail -5 gradle.properties
+
       - name: Compilar APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --max-workers=1 -PreactNativeArchitectures=arm64-v8a -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g"
+        run: |
+          ( while true; do echo "[mem] $(free -m | awk '/Mem:/{print "usada "$3" MB livre "$7" MB"} /Swap:/{print "swap "$3" MB"}' | tr '\n' ' ') top: $(ps -eo rss,comm --sort=-rss | sed -n 2,4p | awk '{printf "%s %dMB; ", $2, $1/1024}')"; sleep 20; done ) &
+          ./gradlew assembleRelease --no-daemon --max-workers=1 -PreactNativeArchitectures=arm64-v8a
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: 2
           NINJA_STATUS: "[%f/%t] "
