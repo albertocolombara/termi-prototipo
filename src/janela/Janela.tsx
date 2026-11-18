@@ -158,13 +158,13 @@ export function Janela({
         m.js = Math.round((m.jsFrames * 1000) / (now - m.jsLast));
         m.jsFrames = 0;
         m.jsLast = now;
-        setMeterText(`JS ${m.js} · paisagem ${m.drawFps} fps · ${Math.round(lw * dpr)}×${Math.round(lh * dpr)} px`);
+        setMeterText(`JS ${m.js} · paisagem ${showLandscape ? m.drawFps : 0} fps · ${Math.round(lw * dpr)}×${Math.round(lh * dpr)} px`);
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [showMeter, lw, lh, dpr]);
+  }, [showMeter, lw, lh, dpr, showLandscape]);
 
   const [la, lo] = pos(progress);
   const hd = bearing([la, lo], pos(Math.min(progress + 0.01, 1))) || bearing(pos(0.98), [51.47, -0.4543]);

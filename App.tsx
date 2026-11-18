@@ -170,20 +170,37 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Relógio e pouso no horário (também ao voltar para o app).
+  // Com a tela bloqueada ou em outro app, o app não faz nada: sem relógio e sem janela.
+  // A notificação fixa e os avisos agendados são do sistema e continuam funcionando.
+  const [active, setActive] = useState(AppState.currentState === 'active');
   useEffect(() => {
-    const check = () => {
+    const sub = AppState.addEventListener('change', (s) => {
+      setActive(s === 'active');
+      const f = flightRef.current;
+      if (!f || f.status !== 'voando') return;
+      if (s === 'active') {
+        log(f, 'Voltou ao app');
+        setNow(Date.now());
+        if (Date.now() >= f.endAt) finish(f, 'pousou');
+        else commit(f);
+      } else if (s === 'background') {
+        log(f, 'App em segundo plano: janela e relógios parados');
+        commit(f);
+      }
+    });
+    return () => sub.remove();
+  }, [commit, finish]);
+
+  // Relógio da tela e pouso no horário, só com o app aberto.
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => {
       setNow(Date.now());
       const f = flightRef.current;
       if (f && f.status === 'voando' && Date.now() >= f.endAt) finish(f, 'pousou');
-    };
-    const id = setInterval(check, 1000);
-    const sub = AppState.addEventListener('change', (s) => s === 'active' && check());
-    return () => {
-      clearInterval(id);
-      sub.remove();
-    };
-  }, [finish]);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [active, finish]);
 
   const board = async () => {
     await Notifications.requestPermissionsAsync();
@@ -335,6 +352,9 @@ export default function App() {
         </Text>
       ) : null}
 
+      {!active ? (
+        <View style={{ width: winW, height: Math.round((winW * 4) / 3), alignSelf: 'center' }} />
+      ) : (
       <Janela
         width={winW}
         progress={progress}
@@ -347,6 +367,7 @@ export default function App() {
         showLandscape={showLandscape}
         showOverlay={showOverlay}
       />
+      )}
 
       <View style={{ padding: 20, gap: 14 }}>
         {confirmExit ? (
