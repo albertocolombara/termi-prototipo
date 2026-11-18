@@ -14,5 +14,6 @@ Cada push na `main` gera um APK em **Releases**.
 ## Estrutura
 - `App.tsx`: telas, voo e serviço de bordo
 - `src/janela/`: janela (shader SkSL, blocos Landsat, rota e sol)
+- `src/ds/`: design system (tokens, fontes, ícones e componentes do Figma) e o catálogo, aberto por "Ver design system" na tela inicial
 - `assets/janela/`: renders do Blender, mapas base e pacotes de blocos
 - `modules/screen-state`: notificação fixa com contagem regressiva (Kotlin)
