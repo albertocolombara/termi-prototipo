@@ -62,7 +62,43 @@
                 "fontFamily": "Geist Pixel",
                 "fontDefinitions": [
                   {
-                    "path": "./node_modules/@expo-google-fonts/geist-pixel/400Regular/GeistPixel_400Regular.ttf",
+                    "path": "./assets/fonts/geist-pixel/GeistPixel-Regular.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "Geist Pixel Circle",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/geist-pixel/GeistPixel-Circle.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "Geist Pixel Grid",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/geist-pixel/GeistPixel-Grid.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "Geist Pixel Triangle",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/geist-pixel/GeistPixel-Triangle.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "Geist Pixel Line",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/geist-pixel/GeistPixel-Line.ttf",
                     "weight": 400
                   }
                 ]
@@ -74,7 +110,11 @@
               "./node_modules/@expo-google-fonts/geist/400Regular/Geist_400Regular.ttf",
               "./node_modules/@expo-google-fonts/geist/500Medium/Geist_500Medium.ttf",
               "./node_modules/@expo-google-fonts/geist/600SemiBold/Geist_600SemiBold.ttf",
-              "./node_modules/@expo-google-fonts/geist-pixel/400Regular/GeistPixel_400Regular.ttf"
+              "./assets/fonts/geist-pixel/GeistPixel-Regular.ttf",
+              "./assets/fonts/geist-pixel/GeistPixel-Circle.ttf",
+              "./assets/fonts/geist-pixel/GeistPixel-Grid.ttf",
+              "./assets/fonts/geist-pixel/GeistPixel-Triangle.ttf",
+              "./assets/fonts/geist-pixel/GeistPixel-Line.ttf"
             ]
           }
         }

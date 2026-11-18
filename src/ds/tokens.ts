@@ -126,10 +126,21 @@ export const radius = {
 } as const;
 
 // ───────── Tipografia ─────────
-// As fontes são embutidas pelo plugin do expo-font (app.json): "Geist" (400/500/600) e "Geist Pixel".
+// As fontes são embutidas pelo plugin do expo-font (app.json): "Geist" (400/500/600) e a Geist Pixel.
+// A Geist Pixel é uma fonte variável (eixo "Element Shape"); cada forma vira um arquivo estático e
+// uma família própria, porque o RN não escolhe eixos de fonte variável de forma confiável no Android.
+export const pixelFamilies = {
+  regular: 'Geist Pixel',
+  circle: 'Geist Pixel Circle',
+  grid: 'Geist Pixel Grid',
+  triangle: 'Geist Pixel Triangle',
+  line: 'Geist Pixel Line',
+} as const;
+export type PixelShape = keyof typeof pixelFamilies;
+
 export const fontFamily = {
   sans: 'Geist',
-  pixel: 'Geist Pixel',
+  pixel: pixelFamilies.regular,
 } as const;
 
 type Weight = '400' | '500' | '600';

@@ -23,7 +23,20 @@ Letter-spacing e line-height vêm do Figma em %, e `tokens.ts` converte para pon
 
 ## Fontes
 
-Embutidas no build pelo plugin do `expo-font` (`app.json`): **Geist** 400/500/600 (`@expo-google-fonts/geist`) e **Geist Pixel** (`@expo-google-fonts/geist-pixel`, a mesma do estilo `Display/Pixel 32` no Figma). Use `fontWeight` com a família `Geist`; o Android escolhe o arquivo pelo peso.
+Embutidas no build pelo plugin do `expo-font` (`app.json`):
+
+- **Geist** 400/500/600 (`@expo-google-fonts/geist`). Use `fontWeight` com a família `Geist`; o Android escolhe o arquivo pelo peso.
+- **Geist Pixel** (`assets/fonts/geist-pixel/`, licença OFL). A fonte original é variável, com o eixo "Element Shape". Cada forma foi gerada como um arquivo estático e registrada como uma família própria, porque o RN não escolhe eixos de fonte variável de forma confiável no Android:
+
+| Forma | Família | No código |
+| --- | --- | --- |
+| Regular (padrão do `Display/Pixel 32`) | `Geist Pixel` | `<Text variant="Display/Pixel 32" />` |
+| Circle | `Geist Pixel Circle` | `pixelShape="circle"` |
+| Grid | `Geist Pixel Grid` | `pixelShape="grid"` |
+| Triangle | `Geist Pixel Triangle` | `pixelShape="triangle"` |
+| Line | `Geist Pixel Line` | `pixelShape="line"` |
+
+A forma Square ficou de fora porque é quase idêntica à Regular (fica a 1 de 100 no eixo). As 5 somam cerca de 4,2 MB no APK. Se o app usar só uma ou duas, dá para tirar as outras do `app.json` e de `pixelFamilies`.
 
 ## Componentes
 

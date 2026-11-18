@@ -18,6 +18,7 @@ import {
   InfoBanner,
   ListOption,
   palette,
+  pixelFamilies,
   PremiumBadge,
   radius,
   screenGutter,
@@ -32,6 +33,7 @@ import {
   ToggleRow,
   TopBar,
   typography,
+  type PixelShape,
   type TypographyVariant,
 } from './index';
 
@@ -127,6 +129,15 @@ export function Catalogo({ onClose }: { onClose: () => void }) {
                 <Label>{`${v} · ${typography[v].fontSize}px`}</Label>
                 <Text variant={v} tone={v.startsWith('Display/Pixel') ? 'accent' : 'primary'} numberOfLines={1}>
                   {v.startsWith('Display') ? '52 min' : v.startsWith('Heading/Screen') ? 'BCN → LHR' : 'Embarque e foque até o pouso'}
+                </Text>
+              </View>
+            ))}
+            <Label>Geist Pixel · formas (pixelShape)</Label>
+            {(Object.keys(pixelFamilies) as PixelShape[]).map((shape) => (
+              <View key={shape} style={styles.typeRow}>
+                <Label>{pixelFamilies[shape]}</Label>
+                <Text variant="Display/Pixel 32" tone="accent" pixelShape={shape} numberOfLines={1}>
+                  Embarque aberto
                 </Text>
               </View>
             ))}
