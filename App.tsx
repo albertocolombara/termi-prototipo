@@ -115,6 +115,16 @@ export default function App() {
   const [cycleId, setCycleId] = useState('teste');
   const [now, setNow] = useState(Date.now());
   const [confirmExit, setConfirmExit] = useState(false);
+  const [exactOk, setExactOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    Notifications.getExactAlarmPermissionsAsync()
+      .then((p) => setExactOk(p.granted))
+      .catch(() => setExactOk(null));
+  }, []);
+  const askExact = async () => {
+    const p = await Notifications.requestExactAlarmPermissionsAsync().catch(() => null);
+    setExactOk(!!p?.granted);
+  };
   // Diagnóstico da janela
   const [fps, setFps] = useState(10);
   const [quality, setQuality] = useState(1);
@@ -223,7 +233,13 @@ export default function App() {
     log(f, f.pauses.length ? `${f.pauses.length} serviço(s) de bordo (${cycle.label})` : 'Sem serviço de bordo');
 
     // Tudo é agendado no embarque: funciona com o app fechado e a tela bloqueada.
-    const date = (ms: number) => ({ type: Notifications.SchedulableTriggerInputTypes.DATE, date: ms } as const);
+    // 'alarmClock' usa setAlarmClock(): o Android entrega no horário mesmo em repouso (Doze)
+    // e a Samsung não adia. Precisa da permissão de alarmes exatos.
+    const exact = await Notifications.getExactAlarmPermissionsAsync().catch(() => null);
+    setExactOk(!!exact?.granted);
+    log(f, exact?.granted ? 'Alarmes exatos: permitido' : 'Alarmes exatos: NÃO permitido (avisos podem atrasar)');
+    const date = (ms: number) =>
+      ({ type: Notifications.SchedulableTriggerInputTypes.DATE, date: ms, delivery: 'alarmClock' } as const);
     try {
       for (const p of f.pauses) {
         const pauseMin = Math.round(((p.end - p.start) / 60000) * 10) / 10;
@@ -279,9 +295,24 @@ export default function App() {
             </Pressable>
           ))}
         </View>
+        {exactOk === false && (
+          <View style={styles.confirm}>
+            <Text style={styles.confirmTitle}>Avisos no horário certo</Text>
+            <Text style={styles.p}>
+              Para o pouso e o serviço de bordo tocarem na hora exata com a tela bloqueada, permita "Alarmes e
+              lembretes" para o Termi. Sem isso, o Android pode atrasar os avisos.
+            </Text>
+            <Pressable style={styles.secondary} onPress={askExact}>
+              <Text style={styles.secondaryText}>Permitir alarmes e lembretes</Text>
+            </Pressable>
+          </View>
+        )}
         <Pressable style={styles.primary} onPress={board}>
           <Text style={styles.primaryText}>Embarcar</Text>
         </Pressable>
+        <Text style={styles.small}>
+          Alarmes exatos: {exactOk === null ? '?' : exactOk ? 'permitido' : 'não permitido'}
+        </Text>
       </ScrollView>
     );
   }
