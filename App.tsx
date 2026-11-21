@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScreenState } from './modules/screen-state/src';
 import { Janela, QUALITY } from './src/janela/Janela';
 import { ROUTE, place, pos, progressAt } from './src/janela/geo';
+import { Catalogo } from './src/ds/Catalogo';
 
 // ───────────────────────── Voo e serviço de bordo ─────────────────────────
 // Sair do app não tem punição. O serviço de bordo é a pausa do Pomodoro:
@@ -116,6 +117,7 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const [confirmExit, setConfirmExit] = useState(false);
   const [exactOk, setExactOk] = useState<boolean | null>(null);
+  const [catalog, setCatalog] = useState(false);
   useEffect(() => {
     Notifications.getExactAlarmPermissionsAsync()
       .then((p) => setExactOk(p.granted))
@@ -268,6 +270,8 @@ export default function App() {
   const top = (RNStatusBar.currentHeight ?? 24) + 12;
   const winW = Math.min(width - 32, 440);
 
+  if (catalog) return <Catalogo onClose={() => setCatalog(false)} />;
+
   // ───────────────────────── Início ─────────────────────────
   if (screen === 'inicio' || !flight) {
     return (
@@ -313,6 +317,9 @@ export default function App() {
         <Text style={styles.small}>
           Alarmes exatos: {exactOk === null ? '?' : exactOk ? 'permitido' : 'não permitido'}
         </Text>
+        <Pressable onPress={() => setCatalog(true)} style={{ paddingVertical: 12 }}>
+          <Text style={[styles.small, { color: C.yellow, textDecorationLine: 'underline' }]}>Ver design system</Text>
+        </Pressable>
       </ScrollView>
     );
   }
